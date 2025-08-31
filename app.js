@@ -26,6 +26,8 @@ const ui = {
   joinInviteInput: document.getElementById('join-invite-input'),
   joinAnswerOutput: document.getElementById('join-answer-output'),
   copyJoinAnswer: document.getElementById('copy-join-answer'),
+  btnJoinCode: document.getElementById('btn-join-code'),
+  openJoinFromInvite: document.getElementById('open-join-from-invite'),   
 };
 
 function shortFp(fp){ return fp.split(' ').slice(0,6).join(' '); }
@@ -220,7 +222,7 @@ ui.completeInviteBtn.addEventListener('click', async () => {
 });
 
 // Pairing flow: Join with invite (as answerer)
-ui.friendList.addEventListener('dblclick', () => ui.joinModal.showModal()); // shortcut: double click empty area
+// ui.friendList.addEventListener('dblclick', () => ui.joinModal.showModal()); // shortcut: double click empty area (now made more explict)
 document.addEventListener('keydown', (e)=>{ if(e.key==='J' && (e.metaKey||e.ctrlKey)) ui.joinModal.showModal(); });
 
 ui.joinInviteInput.addEventListener('input', async () => {
@@ -254,6 +256,16 @@ ui.joinInviteInput.addEventListener('input', async () => {
 
 ui.copyJoinAnswer.addEventListener('click', async () => {
   try { await navigator.clipboard.writeText(ui.joinAnswerOutput.value); } catch {}
+});
+
+// Open the "Join with code" modal directly
+ui.btnJoinCode.addEventListener('click', () => ui.joinModal.showModal());
+
+// Link inside the invite modal to switch to the join modal
+ui.openJoinFromInvite?.addEventListener('click', (e) => {
+  e.preventDefault();
+  ui.inviteModal.close();
+  ui.joinModal.showModal();
 });
 
 // Auto-restore existing friends is not possible without a signaling server.

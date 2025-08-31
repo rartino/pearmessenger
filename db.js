@@ -1,4 +1,4 @@
-// Minimal IndexedDB wrapper for PeerMessenger
+// Minimal IndexedDB wrapper for PearMessenger
 export const db = (() => {
   const DB_NAME = 'peermsg-db';
   const DB_VERSION = 1;

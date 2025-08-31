@@ -1,6 +1,6 @@
 {
-  "name": "PeerMessenger",
-  "short_name": "PeerMsg",
+  "name": "PearMessenger",
+  "short_name": "PearMessenger",
   "start_url": ".",
   "display": "standalone",
   "background_color": "#0b0b0b",
@@ -12,5 +12,5 @@
       "type": "image/png"
     }
   ],
-  "version": "0.1.0"
+  "version": "0.1.1"
 }
