@@ -1,11 +1,13 @@
 import { db } from './db.js';
 import { cryptoUtils } from './crypto.js';
 import { rtc } from './webrtc.js';
+import { CONFIG } from './config.js';
 
 const state = {
   me: null,               // {publicKeyRaw, privateKeyPkcs8, fingerprint}
   friends: new Map(),     // fp -> friend
   conns: new Map(),       // fp -> { pc, dc, aesKey }
+  auto: new Map(),        // fp -> state from connectWithSignaling
   selectedFriend: null,   // fp
 };
 
@@ -47,6 +49,20 @@ async function loadFriends() {
   const list = await db.allFriends();
   list.forEach(f => state.friends.set(f.fingerprint, f));
   renderFriendList();
+  // Auto-connect to friends if signaling is configured
+  if (CONFIG.SIGNALING_URL) {
+    for (const f of state.friends.values()) {
+      const aut = await rtc.connectWithSignaling(state.me, f, {
+        onDataChannel: async (dc) => {
+          const conn = { pc: aut.pc, dc: dc, aesKey: null, signaling: aut.signaling };
+          await ensureEncryptedFor(f, conn);
+        },
+        onConnState: (s) => { renderFriendList(); }
+      });
+      state.auto.set(f.fingerprint, aut);
+    }
+  }
+
 }
 
 function renderFriendList() {
@@ -163,6 +179,7 @@ async function onDataChannelMessage(friendFp, ev) {
 }
 
 function wireDataChannel(friend, conn) {
+
   const { dc } = conn;
   dc.addEventListener('open', async () => {
     renderFriendList();
@@ -172,6 +189,15 @@ function wireDataChannel(friend, conn) {
   });
   dc.addEventListener('close', () => renderFriendList());
   dc.addEventListener('message', (ev) => onDataChannelMessage(friend.fingerprint, ev));
+}
+
+
+async function ensureEncryptedFor(friend, conn) {
+  if (!conn.aesKey) {
+    await rtc.setupEncryption(state.me, friend, conn);
+  }
+  wireDataChannel(friend, conn);
+  state.conns.set(friend.fingerprint, conn);
 }
 
 // UI events
@@ -278,3 +304,20 @@ ui.openJoinFromInvite?.addEventListener('click', (e) => {
   await loadFriends();
   renderMessages();
 })();
+
+
+window.addEventListener('online', () => {
+  // poke negotiations
+  if (CONFIG.SIGNALING_URL) {
+    for (const [fp, aut] of state.auto.entries()) {
+      try { aut.signaling?.send({ t:'hello', fp: state.me.fingerprint }); } catch {}
+    }
+  }
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && CONFIG.SIGNALING_URL) {
+    for (const [fp, aut] of state.auto.entries()) {
+      try { aut.signaling?.send({ t:'hello', fp: state.me.fingerprint }); } catch {}
+    }
+  }
+});
