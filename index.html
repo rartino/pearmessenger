@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+  <title>PeerMessenger</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#111111">
+  <style>
+    :root{ --bg:#0b0b0b; --fg:#f3f3f3; --muted:#9aa0a6; --accent:#4ade80; --danger:#ef4444; --card:#151515; }
+    *{ box-sizing:border-box; }
+    html, body { margin:0; padding:0; width:100%; height:100%; background:var(--bg); color:var(--fg); font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji"; }
+    #app { width:100%; height:100%; display:flex; flex-direction:column; }
+    header { display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-bottom:1px solid #222; background: #0f0f0f; position:sticky; top:0; z-index:5; }
+    header .title{ font-weight:700; letter-spacing:0.3px; }
+    header .id{ font-size:12px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:62vw; }
+    header button { background:var(--accent); color:#0b0b0b; border:none; padding:8px 12px; border-radius:12px; font-weight:700; cursor:pointer; }
+    main { flex:1; display:flex; min-height:0; }
+    #sidebar { width:280px; max-width:45vw; border-right:1px solid #222; overflow:auto; }
+    #content { flex:1; display:flex; flex-direction:column; min-width:0; }
+    .section-title { margin:12px 16px; color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:1px; }
+    .friend { padding:12px 16px; display:flex; gap:10px; align-items:center; border-bottom:1px solid #1f1f1f; cursor:pointer; }
+    .friend .avatar{ width:28px; height:28px; border-radius:50%; background:#2a2a2a; display:flex; align-items:center; justify-content:center; font-size:12px; color:#d1d5db; }
+    .friend .meta{ flex:1; }
+    .friend .meta .name{ font-weight:600; }
+    .friend .meta .fp{ font-size:11px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .friend .status{ font-size:11px; color:var(--muted); }
+    #messages { flex:1; overflow:auto; padding:16px; display:flex; flex-direction:column; gap:8px; }
+    .bubble { max-width:80%; padding:10px 12px; border-radius:16px; background:var(--card); }
+    .bubble.me{ align-self:flex-end; background: #1e293b; }
+    .bubble .meta { font-size:11px; color:var(--muted); margin-top:6px; }
+    #composer { display:flex; gap:8px; padding:12px; border-top:1px solid #222; background:#0f0f0f; }
+    #composer input { flex:1; padding:12px; border-radius:12px; background:#151515; border:1px solid #222; color:var(--fg); }
+    #composer button { background:var(--accent); color:#0b0b0b; border:none; padding:12px 16px; border-radius:12px; font-weight:700; }
+    .empty { color:var(--muted); padding:24px; text-align:center; }
+    .row { display:flex; gap:8px; align-items:center; }
+    .btn { background:#202020; color:var(--fg); border:1px solid #2a2a2a; padding:8px 10px; border-radius:10px; cursor:pointer; }
+    .btn.primary { background:var(--accent); color:#0b0b0b; border:none; }
+    .card { background:var(--card); border:1px solid #222; border-radius:12px; padding:12px; }
+    dialog { border:none; border-radius:16px; padding:0; background:#0f0f0f; color:var(--fg); width:min(680px, 96vw); }
+    dialog::backdrop { background: rgba(0,0,0,0.6); }
+    .modal-head{ display:flex; justify-content:space-between; align-items:center; padding:14px 16px; border-bottom:1px solid #222;}
+    .modal-body{ padding:16px; display:flex; flex-direction:column; gap:12px;}
+    textarea, input[type="text"] { width:100%; min-height:120px; padding:10px; border-radius:10px; background:#151515; border:1px solid #222; color:var(--fg); font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    .small { font-size:12px; color:var(--muted); }
+    .badge { font-size:11px; padding:2px 6px; border-radius:999px; background:#1f2937; color:#9ca3af; border:1px solid #253040; }
+    .danger { color: var(--danger); }
+  </style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div>
+      <div class="title">PeerMessenger</div>
+      <div class="id" id="my-id"></div>
+    </div>
+    <div class="row">
+      <button id="btn-create-invite">Add friend</button>
+    </div>
+  </header>
+  <main>
+    <aside id="sidebar">
+      <div class="section-title">Friends</div>
+      <div id="friend-list"></div>
+    </aside>
+    <section id="content">
+      <div id="messages" class="empty">Select a friend or just start chatting — messages will sync across connected friends.</div>
+      <div id="composer">
+        <input id="message-input" type="text" placeholder="Type a message…" autocomplete="off"/>
+        <button id="send-btn">Send</button>
+      </div>
+    </section>
+  </main>
+</div>
+
+<dialog id="invite-modal">
+  <div class="modal-head">
+    <strong>Share this invite code</strong>
+    <button class="btn" onclick="this.closest('dialog').close()">Close</button>
+  </div>
+  <div class="modal-body">
+    <div class="small">Send this code to your friend via any channel. They'll paste it in their app to generate an answer.</div>
+    <textarea id="invite-code" readonly></textarea>
+    <div class="row">
+      <button class="btn" id="copy-invite">Copy</button>
+      <span class="small">After they send you an answer code, paste it below to finish pairing.</span>
+    </div>
+    <textarea id="answer-input" placeholder="Paste answer code here…"></textarea>
+    <div class="row">
+      <button class="btn primary" id="complete-invite">Complete pairing</button>
+      <span class="small">Make sure the fingerprint they told you matches this: <code id="invite-peer-fp">…</code></span>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="join-modal">
+  <div class="modal-head">
+    <strong>Join with a friend's invite</strong>
+    <button class="btn" onclick="this.closest('dialog').close()">Close</button>
+  </div>
+  <div class="modal-body">
+    <div class="small">Paste your friend's invite code. We'll generate an answer code for you to send back.</div>
+    <textarea id="join-invite-input" placeholder="Paste invite code here…"></textarea>
+    <textarea id="join-answer-output" readonly placeholder="Your answer code will appear here…"></textarea>
+    <div class="row">
+      <button class="btn primary" id="copy-join-answer" disabled>Copy answer</button>
+      <span class="small">Verify fingerprints match on both sides to avoid MITM.</span>
+    </div>
+  </div>
+</dialog>
+
+<script type="module">
+  // Load versioned app
+  fetch('./manifest.json').then(r => r.json()).then(manifest => {
+    window.APP_VERSION = manifest.version;
+    const s1 = document.createElement('script');
+    s1.type = 'module'; s1.src = './db.js?v=' + window.APP_VERSION;
+    const s2 = document.createElement('script');
+    s2.type = 'module'; s2.src = './crypto.js?v=' + window.APP_VERSION;
+    const s3 = document.createElement('script');
+    s3.type = 'module'; s3.src = './webrtc.js?v=' + window.APP_VERSION;
+    const s4 = document.createElement('script');
+    s4.type = 'module'; s4.src = './app.js?v=' + window.APP_VERSION;
+    document.body.appendChild(s1);
+    document.body.appendChild(s2);
+    document.body.appendChild(s3);
+    document.body.appendChild(s4);
+  }).catch(err => console.error('Failed to load manifest:', err));
+</script>
+
+<script>
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').then(() => console.log('Service Worker registered'));
+  }
+</script>
+
+</body>
+</html>
