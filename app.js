@@ -2,11 +2,13 @@ import { db } from './db.js';
 import { cryptoUtils } from './crypto.js';
 import { rtc } from './webrtc.js';
 
+function qrURL(data, size=256){ const base = 'https://api.qrserver.com/v1/create-qr-code/'; return base + '?size=' + size + 'x' + size + '&data=' + encodeURIComponent(data); }
+
 const state = {
-  me: null,               // {publicKeyRaw, privateKeyPkcs8, fingerprint}
-  friends: new Map(),     // fp -> friend
-  conns: new Map(),       // fp -> { pc, dc, aesKey }
-  selectedFriend: null,   // fp
+  me: null,
+  friends: new Map(),
+  conns: new Map(),
+  selectedFriend: null,
 };
 
 const ui = {
@@ -15,6 +17,7 @@ const ui = {
   messages: document.getElementById('messages'),
   input: document.getElementById('message-input'),
   send: document.getElementById('send-btn'),
+
   inviteModal: document.getElementById('invite-modal'),
   inviteCode: document.getElementById('invite-code'),
   invitePeerFp: document.getElementById('invite-peer-fp'),
@@ -22,12 +25,31 @@ const ui = {
   completeInviteBtn: document.getElementById('complete-invite'),
   answerInput: document.getElementById('answer-input'),
   btnCreateInvite: document.getElementById('btn-create-invite'),
+
+  // QR + toggles + fingerprints
+  btnJoinCode: document.getElementById('btn-join-code'),
+  openJoinFromInvite: document.getElementById('open-join-from-invite'),
+  inviteQR: document.getElementById('invite-qr'),
+  inviteQRWrap: document.getElementById('invite-qr-wrap'),
+  inviteCodeWrap: document.getElementById('invite-code-wrap'),
+  toggleInviteCode: document.getElementById('toggle-invite-code'),
+  inviteEmojiFp: document.getElementById('invite-emoji-fp'),
+  inviteWordFp: document.getElementById('invite-word-fp'),
+  toggleInviteQR: document.getElementById('toggle-invite-qr'),
+
   joinModal: document.getElementById('join-modal'),
   joinInviteInput: document.getElementById('join-invite-input'),
   joinAnswerOutput: document.getElementById('join-answer-output'),
   copyJoinAnswer: document.getElementById('copy-join-answer'),
-  btnJoinCode: document.getElementById('btn-join-code'),
-  openJoinFromInvite: document.getElementById('open-join-from-invite'),   
+  joinQRWrap: document.getElementById('join-qr-wrap'),
+  joinCodeWrap: document.getElementById('join-code-wrap'),
+  joinAnswerQR: document.getElementById('join-answer-qr'),
+  toggleJoinCode: document.getElementById('toggle-join-code'),
+  toggleJoinQR: document.getElementById('toggle-join-qr'),
+  joinInviterEmojiFp: document.getElementById('join-inviter-emoji-fp'),
+  joinInviterWordFp: document.getElementById('join-inviter-word-fp'),
+  joinMyEmojiFp: document.getElementById('join-my-emoji-fp'),
+  joinMyWordFp: document.getElementById('join-my-word-fp'),
 };
 
 function shortFp(fp){ return fp.split(' ').slice(0,6).join(' '); }
@@ -35,12 +57,12 @@ function initials(name){ return (name||'F').trim().slice(0,2).toUpperCase(); }
 
 async function ensureIdentity() {
   let me = await db.getKV('identity');
-  if (!me) {
-    me = await cryptoUtils.generateIdentity();
-    await db.setKV('identity', me);
-  }
+  if (!me) { me = await cryptoUtils.generateIdentity(); await db.setKV('identity', me); }
   state.me = me;
   ui.myId.textContent = `Your fingerprint: ${shortFp(me.fingerprint)}`;
+  // Precompute emoji/word fingerprints
+  cryptoUtils.emojiFingerprintFromPubRaw(me.publicKeyRaw).then(v => { if (ui.inviteEmojiFp) ui.inviteEmojiFp.textContent = v; if (ui.joinMyEmojiFp) ui.joinMyEmojiFp.textContent = v; });
+  cryptoUtils.wordFingerprintFromPubRaw(me.publicKeyRaw).then(v => { if (ui.inviteWordFp) ui.inviteWordFp.textContent = v; if (ui.joinMyWordFp) ui.joinMyWordFp.textContent = v; });
 }
 
 async function loadFriends() {
@@ -53,7 +75,7 @@ function renderFriendList() {
   ui.friendList.innerHTML = '';
   if (state.friends.size === 0) {
     const empty = document.createElement('div');
-    empty.className = 'empty'; empty.textContent = 'No friends yet. Click "Add friend" to pair.';
+    empty.className = 'empty'; empty.textContent = 'No friends yet. Click "Add friend" or "Join with code" to pair.';
     ui.friendList.appendChild(empty);
     return;
   }
@@ -69,10 +91,7 @@ function renderFriendList() {
   }
 }
 
-async function selectFriend(fp) {
-  state.selectedFriend = fp;
-  renderMessages();
-}
+async function selectFriend(fp) { state.selectedFriend = fp; renderMessages(); }
 
 async function renderMessages() {
   const msgs = await db.recentMessages(300);
@@ -93,20 +112,11 @@ async function renderMessages() {
   ui.messages.scrollTop = ui.messages.scrollHeight;
 }
 
-// Messaging model
 function newMessage(text) {
-  return {
-    id: crypto.randomUUID(),
-    ts: Date.now(),
-    from: state.me.fingerprint,
-    text,
-    deliveredTo: [], // fingerprints
-    seenBy: [state.me.fingerprint]
-  };
+  return { id: crypto.randomUUID(), ts: Date.now(), from: state.me.fingerprint, text, deliveredTo: [], seenBy: [state.me.fingerprint] };
 }
 
 async function handleIncoming(friendFp, payload) {
-  // payload is encrypted { iv, ct } of an object like {type, data}
   const conn = state.conns.get(friendFp);
   if (!conn?.aesKey) return;
   try {
@@ -117,27 +127,22 @@ async function handleIncoming(friendFp, payload) {
       if (!exists) {
         await db.putMessage(m);
         renderMessages();
-        // forward to others (gossip), except sender and those who already saw it
+        // gossip to others
         for (const [fp, c] of state.conns.entries()) {
           if (fp === friendFp) continue;
           if (m.seenBy?.includes(fp)) continue;
           sendEncrypted(fp, { type:'chat', data: { ...m, seenBy: Array.from(new Set([...(m.seenBy||[]), fp])) } });
         }
       }
-      // mark delivered to friend
-      if (!exists || !(exists.deliveredTo||[]).includes(friendFp)) {
-        const updated = exists || m;
-        updated.deliveredTo = Array.from(new Set([...(updated.deliveredTo||[]), friendFp]));
-        await db.putMessage(updated);
-      }
+      // mark delivered to sender
+      const updated = exists || m;
+      updated.deliveredTo = Array.from(new Set([...(updated.deliveredTo||[]), friendFp]));
+      await db.putMessage(updated);
     } else if (msg.type === 'have') {
-      // friend tells us which messages they have (ids). Send missing ones.
       const ids = msg.data.ids || [];
       const recent = await db.recentMessages(200);
       const missing = recent.filter(m => !ids.includes(m.id));
-      for (const m of missing) {
-        await sendEncrypted(friendFp, { type:'chat', data: m });
-      }
+      for (const m of missing) await sendEncrypted(friendFp, { type:'chat', data: m });
     }
   } catch (e) {
     console.warn('Failed to decrypt/process incoming', e);
@@ -151,11 +156,7 @@ async function sendEncrypted(friendFp, obj) {
   conn.dc.send(JSON.stringify(payload));
 }
 
-async function sendToAll(obj) {
-  for (const [fp, conn] of state.conns.entries()) {
-    await sendEncrypted(fp, obj);
-  }
-}
+async function sendToAll(obj) { for (const [fp] of state.conns.entries()) await sendEncrypted(fp, obj); }
 
 async function onDataChannelMessage(friendFp, ev) {
   const data = JSON.parse(ev.data);
@@ -166,7 +167,6 @@ function wireDataChannel(friend, conn) {
   const { dc } = conn;
   dc.addEventListener('open', async () => {
     renderFriendList();
-    // on connect, exchange "have" lists to sync
     const recent = await db.recentMessages(200);
     await sendEncrypted(friend.fingerprint, { type:'have', data: { ids: recent.map(m => m.id) } });
   });
@@ -182,33 +182,31 @@ ui.send.addEventListener('click', async () => {
   await db.putMessage(m);
   ui.input.value='';
   renderMessages();
-  // send to all connected friends
   await sendToAll({ type:'chat', data: m });
 });
-
 ui.input.addEventListener('keydown', (e) => { if (e.key === 'Enter') ui.send.click(); });
 
-// Pairing flow: Create invite (as offerer)
+// Invite (offerer)
 ui.btnCreateInvite.addEventListener('click', async () => {
   const { state: rstate, code } = await rtc.createInvite(state.me, '');
   ui.inviteCode.value = code;
   ui.invitePeerFp.textContent = shortFp(state.me.fingerprint);
+  if (ui.inviteQR) ui.inviteQR.src = qrURL(code, 256);
+  if (ui.inviteQRWrap && ui.inviteCodeWrap) { ui.inviteQRWrap.style.display='block'; ui.inviteCodeWrap.style.display='none'; }
   ui.inviteModal.showModal();
-  // Temporarily hold the state in window to finish pairing
   window.__pendingInviteState = rstate;
 });
-
-ui.copyInvite.addEventListener('click', async () => {
-  try { await navigator.clipboard.writeText(ui.inviteCode.value); } catch {}
-});
+ui.copyInvite.addEventListener('click', async () => { try { await navigator.clipboard.writeText(ui.inviteCode.value); } catch {} });
+ui.toggleInviteCode?.addEventListener('click', () => { ui.inviteQRWrap.style.display='none'; ui.inviteCodeWrap.style.display='block'; });
+ui.toggleInviteQR?.addEventListener('click', () => { ui.inviteQRWrap.style.display='block'; ui.inviteCodeWrap.style.display='none'; });
 
 ui.completeInviteBtn.addEventListener('click', async () => {
   const ans = ui.answerInput.value.trim();
   if (!ans) return;
   try {
     const friend = await rtc.completeInvite(state.me, window.__pendingInviteState, ans);
-    // set up encryption and connection bookkeeping
     const conn = window.__pendingInviteState;
+    // encryption and wiring
     await rtc.setupEncryption(state.me, friend, conn);
     state.conns.set(friend.fingerprint, conn);
     conn.dc.addEventListener('message', (ev) => onDataChannelMessage(friend.fingerprint, ev));
@@ -221,20 +219,25 @@ ui.completeInviteBtn.addEventListener('click', async () => {
   }
 });
 
-// Pairing flow: Join with invite (as answerer)
-// ui.friendList.addEventListener('dblclick', () => ui.joinModal.showModal()); // shortcut: double click empty area (now made more explict)
-document.addEventListener('keydown', (e)=>{ if(e.key==='J' && (e.metaKey||e.ctrlKey)) ui.joinModal.showModal(); });
+// Join (answerer)
+ui.btnJoinCode.addEventListener('click', () => ui.joinModal.showModal());
+ui.openJoinFromInvite?.addEventListener('click', (e) => { e.preventDefault(); ui.inviteModal.close(); ui.joinModal.showModal(); });
 
 ui.joinInviteInput.addEventListener('input', async () => {
   const code = ui.joinInviteInput.value.trim();
   if (!code) return;
   try {
+    // update inviter fingerprints immediately for verification
+    try { const inv = rtc.decodeCode(code); if (inv?.me?.pub) {
+      cryptoUtils.emojiFingerprintFromPubRaw(inv.me.pub).then(v => { if (ui.joinInviterEmojiFp) ui.joinInviterEmojiFp.textContent = v; });
+      cryptoUtils.wordFingerprintFromPubRaw(inv.me.pub).then(v => { if (ui.joinInviterWordFp) ui.joinInviterWordFp.textContent = v; });
+    }} catch {}
     const { state: rstate, friend, code: answer } = await rtc.acceptInviteAndCreateAnswer(state.me, code);
     window.__pendingJoinState = { rstate, friend };
     ui.joinAnswerOutput.value = answer;
     ui.copyJoinAnswer.disabled = false;
+    if (ui.joinAnswerQR) ui.joinAnswerQR.src = qrURL(answer, 256);
 
-    // once the inviter pastes our answer, the connection should establish
     rstate.pc.addEventListener('connectionstatechange', async () => {
       if (rstate.pc.connectionState === 'connected') {
         await rtc.setupEncryption(state.me, friend, rstate);
@@ -244,37 +247,14 @@ ui.joinInviteInput.addEventListener('input', async () => {
         ui.joinModal.close();
       }
     });
-
-    rstate.pc.ondatachannel = (ev) => {
-      rstate.dc = ev.channel;
-      wireDataChannel(friend, rstate);
-    };
+    rstate.pc.ondatachannel = (ev) => { rstate.dc = ev.channel; wireDataChannel(friend, rstate); };
   } catch (e) {
-    // ignore parsing errors while typing
+    // ignore parse/setup errors while typing
   }
 });
-
-ui.copyJoinAnswer.addEventListener('click', async () => {
-  try { await navigator.clipboard.writeText(ui.joinAnswerOutput.value); } catch {}
-});
-
-// Open the "Join with code" modal directly
-ui.btnJoinCode.addEventListener('click', () => ui.joinModal.showModal());
-
-// Link inside the invite modal to switch to the join modal
-ui.openJoinFromInvite?.addEventListener('click', (e) => {
-  e.preventDefault();
-  ui.inviteModal.close();
-  ui.joinModal.showModal();
-});
-
-// Auto-restore existing friends is not possible without a signaling server.
-// You will need to re-pair (exchange codes) to connect after reloads.
-// However, all your messages stay in IndexedDB and will sync when reconnected.
+ui.copyJoinAnswer.addEventListener('click', async () => { try { await navigator.clipboard.writeText(ui.joinAnswerOutput.value); } catch {} });
+ui.toggleJoinCode?.addEventListener('click', () => { ui.joinQRWrap.style.display='none'; ui.joinCodeWrap.style.display='block'; });
+ui.toggleJoinQR?.addEventListener('click', () => { ui.joinQRWrap.style.display='block'; ui.joinCodeWrap.style.display='none'; });
 
 // Boot
-(async function boot(){
-  await ensureIdentity();
-  await loadFriends();
-  renderMessages();
-})();
+(async function boot(){ await ensureIdentity(); await loadFriends(); renderMessages(); })();

@@ -45,6 +45,7 @@
     .small { font-size:12px; color:var(--muted); }
     .badge { font-size:11px; padding:2px 6px; border-radius:999px; background:#1f2937; color:#9ca3af; border:1px solid #253040; }
     .danger { color: var(--danger); }
+    img.qr{ width:240px; height:240px; image-rendering:pixelated; border-radius:12px; background:#fff; }
   </style>
 </head>
 <body>
@@ -76,23 +77,42 @@
 
 <dialog id="invite-modal">
   <div class="modal-head">
-    <strong>Share this invite code</strong>
+    <strong>Share this invite</strong>
     <button class="btn" onclick="this.closest('dialog').close()">Close</button>
   </div>
   <div class="modal-body">
-    <div class="small">Send this code to your friend via any channel. They'll paste it in their app to generate an answer.</div>
-    <textarea id="invite-code" readonly></textarea>
-    <div class="row">
-      <button class="btn" id="copy-invite">Copy</button>
-      <span class="small">After they send you an answer code, paste it below to finish pairing.</span>
+    <div class="card">
+      <div class="small">Verify these match with your friend:</div>
+      <div class="row" style="flex-wrap:wrap; gap:12px;">
+        <div><div class="small">Your emoji fingerprint</div><div id="invite-emoji-fp" style="font-size:22px; line-height:1.4;"></div></div>
+        <div><div class="small">Your word fingerprint</div><div id="invite-word-fp" class="badge" style="font-size:14px;"></div></div>
+      </div>
     </div>
-    <textarea id="answer-input" placeholder="Paste answer code here…"></textarea>
-    <div class="row">
-      <button class="btn primary" id="complete-invite">Complete pairing</button>
-      <span class="small">Make sure the fingerprint they told you matches this: <code id="invite-peer-fp">…</code></span>
+    <div id="invite-qr-wrap" class="card" style="display:block;">
+      <div class="small">Let your friend scan this QR.</div>
+      <img id="invite-qr" class="qr" alt="Invite QR"/>
+      <div style="margin-top:8px;">
+        <button class="btn" id="toggle-invite-code">Use code verification instead</button>
+      </div>
     </div>
-    <div class="small" style="margin-top:6px;">
-      <a href="#" id="open-join-from-invite">Have a code instead? Paste it here.</a>
+    <div id="invite-code-wrap" class="card" style="display:none;">
+      <div class="small">Send this invite code via any channel. Paste their answer below.</div>
+      <textarea id="invite-code" readonly></textarea>
+      <div class="row">
+        <button class="btn" id="copy-invite">Copy</button>
+        <span class="small">After they send you an answer code, paste it below to finish pairing.</span>
+      </div>
+      <textarea id="answer-input" placeholder="Paste answer code here…"></textarea>
+      <div class="row">
+        <button class="btn primary" id="complete-invite">Complete pairing</button>
+        <span class="small">Make sure the fingerprint they told you matches this: <code id="invite-peer-fp">…</code></span>
+      </div>
+      <div class="small" style="margin-top:6px;">
+        <a href="#" id="open-join-from-invite">Have a code instead? Paste it here.</a>
+      </div>
+      <div style="margin-top:8px;">
+        <button class="btn" id="toggle-invite-qr">Show QR instead</button>
+      </div>
     </div>
   </div>
 </dialog>
@@ -105,10 +125,29 @@
   <div class="modal-body">
     <div class="small">Paste your friend's invite code. We'll generate an answer code for you to send back.</div>
     <textarea id="join-invite-input" placeholder="Paste invite code here…"></textarea>
-    <textarea id="join-answer-output" readonly placeholder="Your answer code will appear here…"></textarea>
-    <div class="row">
-      <button class="btn primary" id="copy-join-answer" disabled>Copy answer</button>
-      <span class="small">Verify fingerprints match on both sides to avoid MITM.</span>
+    <div class="card">
+      <div class="small">Verify these match:</div>
+      <div class="row" style="flex-wrap:wrap; gap:12px;">
+        <div><div class="small">Friend emoji fingerprint</div><div id="join-inviter-emoji-fp" style="font-size:22px; line-height:1.4;"></div></div>
+        <div><div class="small">Friend word fingerprint</div><div id="join-inviter-word-fp" class="badge" style="font-size:14px;"></div></div>
+        <div><div class="small">Your emoji fingerprint</div><div id="join-my-emoji-fp" style="font-size:22px; line-height:1.4;"></div></div>
+        <div><div class="small">Your word fingerprint</div><div id="join-my-word-fp" class="badge" style="font-size:14px;"></div></div>
+      </div>
+    </div>
+    <div id="join-qr-wrap" class="card" style="display:none;">
+      <div class="small">Show this QR to your inviter.</div>
+      <img id="join-answer-qr" class="qr" alt="Answer QR"/>
+      <div style="margin-top:8px;">
+        <button class="btn" id="toggle-join-code">Use code verification instead</button>
+      </div>
+    </div>
+    <div id="join-code-wrap" class="card" style="display:block;">
+      <textarea id="join-answer-output" readonly placeholder="Your answer code will appear here…"></textarea>
+      <div class="row">
+        <button class="btn primary" id="copy-join-answer" disabled>Copy answer</button>
+        <button class="btn" id="toggle-join-qr">Show QR instead</button>
+        <span class="small">Verify fingerprints match on both sides to avoid MITM.</span>
+      </div>
     </div>
   </div>
 </dialog>
@@ -125,11 +164,8 @@
     s3.type = 'module'; s3.src = './webrtc.js?v=' + window.APP_VERSION;
     const s4 = document.createElement('script');
     s4.type = 'module'; s4.src = './app.js?v=' + window.APP_VERSION;
-    document.body.appendChild(s1);
-    document.body.appendChild(s2);
-    document.body.appendChild(s3);
-    document.body.appendChild(s4);
-  }).catch(err => console.error('Failed to load manifest:', err));
+    document.body.appendChild(s1); document.body.appendChild(s2); document.body.appendChild(s3); document.body.appendChild(s4);
+  });
 </script>
 
 <script>
