@@ -1,4 +1,4 @@
-// PeerMessenger Service Worker
+// PearMessenger Service Worker
 fetch('./manifest.json').then(r => r.json()).then(manifest => {
   const APP_VERSION = manifest.version || '0';
   const CACHE_NAME = `peermsg-cache-v${APP_VERSION}`;
